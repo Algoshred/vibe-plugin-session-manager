@@ -1,13 +1,14 @@
 {
   "name": "@vibecontrols/vibe-plugin-session-manager",
-  "version": "2026.428.1",
+  "version": "2026.428.3",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "type": "module",
   "engines": {
     "bun": ">=1.3.0"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun --external elysia",
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --external elysia && tsc --emitDeclarationOnly --declaration --declarationMap --outDir ./dist",
     "lint": "eslint ./src",
     "format": "bunx prettier . --write",
     "format:check": "bunx prettier . --check",
@@ -66,7 +67,7 @@
   },
   "homepage": "https://vibecontrols.com",
   "publishConfig": {
-    "access": "restricted",
+    "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
   "files": [
