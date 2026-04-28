@@ -8,39 +8,11 @@
 
 import { Elysia, t } from "elysia";
 
-// ---------------------------------------------------------------------------
-// Types — locally redeclared (same pattern as all vibe plugins)
-// ---------------------------------------------------------------------------
-
-interface SessionProviderCapabilities {
-  provider: string;
-  features: {
-    mouse: boolean;
-    resize: boolean;
-    capture: boolean;
-    webTerminal: boolean;
-    splitPanes: boolean;
-    tabs: boolean;
-    scrollback: boolean;
-    clipboard: boolean;
-    search: boolean;
-  };
-  platform: string[];
-}
-
-interface HealthCheckResult {
-  ok: boolean;
-  sessions: number;
-  terminals: number;
-  message?: string;
-}
-
-/** Minimal SessionProvider shape needed by the manager. */
-interface SessionProvider {
-  readonly name: string;
-  healthCheck(): Promise<HealthCheckResult>;
-  getCapabilities?(): SessionProviderCapabilities;
-}
+import type { SessionProvider } from "./provider.js";
+import type {
+  SessionProviderCapabilities,
+} from "./provider.js";
+import type { HealthCheckResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // HostServices — provided by the vibe-agent runtime at plugin load
@@ -401,10 +373,6 @@ export const vibePlugin: VibePlugin = {
 };
 
 export default vibePlugin;
-export type {
-  SessionProviderCapabilities,
-  SessionProvider,
-  HealthCheckResult,
-  VibePlugin,
-  HostServices,
-};
+export type * from "./provider.js";
+export type * from "./types.js";
+export type { VibePlugin, HostServices };
