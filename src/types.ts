@@ -11,6 +11,17 @@ export interface SessionConfig {
   shell?: string;
   size?: { cols: number; rows: number };
   projectId?: string;
+  /**
+   * Provider-native session name (e.g. tmux session name, wezterm
+   * workspace, zellij session). When provided:
+   *   - If a matching daemon-side session already exists, the
+   *     provider must adopt it instead of creating a new one.
+   *   - Otherwise the provider creates with this exact name (no
+   *     `vibe-<id>` mangling) so reconnects from another tool keep
+   *     working.
+   * Optional. Length-bounded by the provider.
+   */
+  externalName?: string;
 }
 
 export type SessionStatus = "active" | "inactive" | "terminated" | "error";

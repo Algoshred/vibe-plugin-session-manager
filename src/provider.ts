@@ -178,4 +178,44 @@ export interface SessionProvider {
     sessionId: string,
     pattern: string,
   ): Promise<{ line: number; content: string }[]>;
+
+  // ── Orphan Discovery & Adoption ─────────────────────────────────────
+  // Terminal multiplexers (tmux, wezterm, zellij) are daemons that
+  // outlive the agent. When the agent is killed or its storage is
+  // wiped (fresh install, profile switch, encryption key rotation),
+  // `vibe-*` sessions on the host become invisible to the UI. These
+  // two methods let providers expose those sessions for reconnection.
+
+  /**
+   * List host-level sessions owned by this provider whose names match
+   * `vibe-*` (the prefix this stack uses for its sessions) but are not
+   * currently tracked in storage. Optional — providers without a
+   * persistent host daemon (e.g. raw PTY) won't implement this.
+   */
+  discoverOrphans?(): Promise<OrphanSessionInfo[]>;
+
+  /**
+   * Adopt an orphan session into storage. Idempotent — adopting an
+   * already-tracked session must return the existing record.
+   */
+  adopt?(externalName: string, displayName?: string): Promise<SessionInfo>;
+}
+
+/**
+ * Metadata for an orphan session discovered on the host but not yet
+ * tracked by the agent. `externalName` is the provider-native session
+ * identifier (e.g. tmux session name, wezterm pane id) — opaque to
+ * callers and only meaningful to the originating provider.
+ */
+export interface OrphanSessionInfo {
+  /** Provider-native session id (e.g. "vibe-051c9c62" for tmux). */
+  externalName: string;
+  /** Backend provider name ("tmux" / "wezterm" / "zellij"). */
+  provider: string;
+  /** Number of windows / panes / tabs in the session. */
+  windows: number;
+  /** Whether something is currently attached to the session. */
+  attached: boolean;
+  /** ISO-8601 creation time, if known. */
+  createdAt?: string;
 }
