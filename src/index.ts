@@ -9,10 +9,14 @@
 import { Elysia, t } from "elysia";
 
 import type { SessionProvider } from "./provider.js";
-import type {
-  SessionProviderCapabilities,
-} from "./provider.js";
+import type { SessionProviderCapabilities } from "./provider.js";
 import type { HealthCheckResult } from "./types.js";
+import {
+  createRoutes as createSessionRoutes,
+  setSessionPluginCatalog,
+} from "./session-routes.js";
+import { registerSessionCommands } from "./session-commands.js";
+import type { PluginRouteDeps as SessionPluginRouteDeps } from "./session-types.js";
 
 // ---------------------------------------------------------------------------
 // HostServices — provided by the vibe-agent runtime at plugin load
@@ -85,18 +89,31 @@ interface VibePlugin {
   cliCommand?: string;
   apiPrefix?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  createRoutes?: () => any;
+  createRoutes?: (deps?: SessionPluginRouteDeps) => any;
   onCliSetup?: (program: unknown, hostServices?: HostServices) => void;
   onServerStart?: (app: unknown, hostServices?: HostServices) => void;
   onServerReady?: (app: unknown, hostServices?: HostServices) => void;
   onServerStop?: () => void;
 }
 
+/**
+ * Plugin catalog entry shape — agent injects this so the session router
+ * can map a backend session type ("TMUX" / "WEZTERM" / "ZELLIJ") to the
+ * pluginName that owns the matching provider.
+ */
+interface SessionCatalogEntry {
+  category: string;
+  pluginName: string;
+  sessionBackend?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Feature keys — all valid feature names for negotiation
 // ---------------------------------------------------------------------------
 
-const FEATURE_KEYS: ReadonlyArray<keyof SessionProviderCapabilities["features"]> = [
+const FEATURE_KEYS: ReadonlyArray<
+  keyof SessionProviderCapabilities["features"]
+> = [
   "mouse",
   "resize",
   "capture",
@@ -130,10 +147,14 @@ class SessionManager {
       const source = "session-manager";
       const logger = hostServices.logger;
       this.log = {
-        info: (msg, meta) => logger.info(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        warn: (msg, meta) => logger.warn(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        error: (msg, meta) => logger.error(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        debug: (msg, meta) => logger.debug(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        info: (msg, meta) =>
+          logger.info(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        warn: (msg, meta) =>
+          logger.warn(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        error: (msg, meta) =>
+          logger.error(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        debug: (msg, meta) =>
+          logger.debug(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
       };
     }
     this.registry = hostServices?.serviceRegistry;
@@ -143,7 +164,10 @@ class SessionManager {
   /**
    * List all registered session provider entries from the service registry.
    */
-  private listProviderEntries(): Array<{ pluginName: string; isDefault: boolean }> {
+  private listProviderEntries(): Array<{
+    pluginName: string;
+    isDefault: boolean;
+  }> {
     if (!this.registry) {
       this.log.warn("No service registry available");
       return [];
@@ -156,7 +180,10 @@ class SessionManager {
    */
   private getProvider(pluginName: string): SessionProvider | undefined {
     if (!this.registry) return undefined;
-    return this.registry.getProviderByName<SessionProvider>("session", pluginName);
+    return this.registry.getProviderByName<SessionProvider>(
+      "session",
+      pluginName,
+    );
   }
 
   /**
@@ -342,7 +369,9 @@ function createSessionManagerRoutes(manager: SessionManager) {
     .get(
       "/capabilities/:provider",
       ({ params }) => {
-        const capabilities = manager.getCapabilitiesForProvider(params.provider);
+        const capabilities = manager.getCapabilitiesForProvider(
+          params.provider,
+        );
         if (!capabilities) {
           return {
             error: `Provider "${params.provider}" not found or has no capabilities`,
@@ -381,18 +410,34 @@ const manager = new SessionManager();
 
 export const vibePlugin: VibePlugin = {
   name: "session-manager",
-  version: "2026.329.1",
+  version: "2026.508.1",
   description:
-    "Unified session manager — capability discovery, feature negotiation, and provider routing across session providers",
-  tags: ["backend", "integration"],
-  apiPrefix: "/api/session-manager",
+    "Unified session manager — capability discovery + feature negotiation + provider routing, plus the canonical session routes (/api/sessions/*) and `vibe session` CLI",
+  tags: ["backend", "cli", "integration"],
+  cliCommand: "session",
+  apiPrefix: "/api/sessions",
 
-  createRoutes() {
+  createRoutes(deps?: SessionPluginRouteDeps) {
+    // Mount the canonical /api/sessions routes when the agent passes
+    // PluginRouteDeps with a service registry. Fall back to just the
+    // capability-discovery routes (legacy /api/session-manager surface)
+    // when called without deps.
+    if (deps && deps.serviceRegistry) {
+      // The agent gives us its full plugin catalog through hostServices
+      // when available — wire it so backend-type → provider mapping works.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const catalog = (deps as any).integrations?.pluginCatalog as
+        | SessionCatalogEntry[]
+        | undefined;
+      if (catalog) setSessionPluginCatalog(catalog);
+      return createSessionRoutes(deps);
+    }
     return createSessionManagerRoutes(manager);
   },
 
-  onCliSetup(_program: unknown, hostServices?: HostServices): void {
+  onCliSetup(program: unknown, hostServices?: HostServices): void {
     registerStatusContributors(hostServices);
+    registerSessionCommands(program, hostServices);
   },
 
   onServerStart(_app: unknown, hostServices?: HostServices): void {
