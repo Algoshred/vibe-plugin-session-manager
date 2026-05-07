@@ -1,6 +1,6 @@
 {
   "name": "@vibecontrols/vibe-plugin-session-manager",
-  "version": "2026.506.2",
+  "version": "2026.507.1",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
