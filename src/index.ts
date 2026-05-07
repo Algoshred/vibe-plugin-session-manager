@@ -60,6 +60,9 @@ interface CliContributorRegistryLike {
 }
 
 interface HostServices {
+  telemetry?: {
+    emit: (name: string, payload?: Record<string, unknown>) => void;
+  };
   logger?: {
     info(source: string, msg: string): void;
     warn(source: string, msg: string): void;
@@ -75,7 +78,18 @@ interface HostServices {
 // VibePlugin interface
 // ---------------------------------------------------------------------------
 
+interface PluginCapabilities {
+  storage?: "none" | "read" | "rw";
+  secrets?: "none" | "read" | "rw";
+  gateway?: boolean;
+  broadcast?: boolean;
+  subprocess?: boolean;
+  audit?: boolean;
+  telemetry?: boolean;
+}
+
 interface VibePlugin {
+  capabilities?: PluginCapabilities;
   name: string;
   version: string;
   description: string;
@@ -380,6 +394,13 @@ function createSessionManagerRoutes(manager: SessionManager) {
 const manager = new SessionManager();
 
 export const vibePlugin: VibePlugin = {
+  capabilities: {
+    storage: "rw",
+    subprocess: true,
+    broadcast: true,
+    audit: true,
+    telemetry: true,
+  },
   name: "session-manager",
   version: "2026.329.1",
   description:
@@ -396,6 +417,7 @@ export const vibePlugin: VibePlugin = {
   },
 
   onServerStart(_app: unknown, hostServices?: HostServices): void {
+    hostServices?.telemetry?.emit("session.meta.ready", {});
     manager.init(hostServices);
     registerStatusContributors(hostServices);
   },
