@@ -37,6 +37,28 @@ interface ServiceRegistry {
   ): Array<{ pluginName: string; isDefault: boolean }>;
 }
 
+interface CliContributorRegistryLike {
+  addStatusSection(section: {
+    source: string;
+    title: string;
+    render: (ctx: { agentUrl: string }) => Promise<string | null>;
+    json?: (ctx: { agentUrl: string }) => Promise<unknown>;
+    jsonKey?: string;
+  }): void;
+  addDoctorCheck(check: {
+    source: string;
+    run: () => Promise<
+      Array<{
+        name: string;
+        ok: boolean;
+        grade?: "warn";
+        message: string;
+        hint?: string;
+      }>
+    >;
+  }): void;
+}
+
 interface HostServices {
   logger?: {
     info(source: string, msg: string): void;
@@ -46,6 +68,7 @@ interface HostServices {
   };
   config?: Record<string, unknown>;
   serviceRegistry?: ServiceRegistry;
+  cliContributors?: CliContributorRegistryLike;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +86,7 @@ interface VibePlugin {
   apiPrefix?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   createRoutes?: () => any;
+  onCliSetup?: (program: unknown, hostServices?: HostServices) => void;
   onServerStart?: (app: unknown, hostServices?: HostServices) => void;
   onServerReady?: (app: unknown, hostServices?: HostServices) => void;
   onServerStop?: () => void;
@@ -367,10 +391,90 @@ export const vibePlugin: VibePlugin = {
     return createSessionManagerRoutes(manager);
   },
 
+  onCliSetup(_program: unknown, hostServices?: HostServices): void {
+    registerStatusContributors(hostServices);
+  },
+
   onServerStart(_app: unknown, hostServices?: HostServices): void {
     manager.init(hostServices);
+    registerStatusContributors(hostServices);
   },
 };
+
+function registerStatusContributors(hostServices?: HostServices): void {
+  const reg = hostServices?.cliContributors;
+  if (!reg) return; // older agent without contributor registry — graceful no-op
+
+  reg.addStatusSection({
+    source: "session-manager",
+    title: "Sessions",
+    render: async ({ agentUrl }) => {
+      try {
+        const res = await fetch(`${agentUrl}/api/sessions`);
+        if (!res.ok) return null;
+        const list = (await res.json()) as unknown;
+        if (!Array.isArray(list)) return "\x1b[2m(unable to fetch)\x1b[22m";
+        if (list.length === 0) return "\x1b[2m(none)\x1b[22m";
+        return `\x1b[32m${list.length} active\x1b[39m`;
+      } catch {
+        return null;
+      }
+    },
+    json: async ({ agentUrl }) => {
+      try {
+        const res = await fetch(`${agentUrl}/api/sessions`);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    },
+    jsonKey: "sessions",
+  });
+
+  reg.addDoctorCheck({
+    source: "session-manager",
+    run: async () => {
+      try {
+        const port = (process.env.AGENT_URL ?? "http://localhost:3005").replace(
+          /\/+$/,
+          "",
+        );
+        const res = await fetch(`${port}/api/sessions`);
+        if (!res.ok) {
+          return [
+            {
+              name: "Session manager",
+              ok: false,
+              grade: "warn" as const,
+              message: `/api/sessions returned ${res.status}`,
+            },
+          ];
+        }
+        const list = (await res.json()) as unknown;
+        if (!Array.isArray(list)) {
+          return [
+            {
+              name: "Session manager",
+              ok: false,
+              grade: "warn" as const,
+              message: "/api/sessions did not return an array",
+            },
+          ];
+        }
+        return [
+          {
+            name: "Session manager",
+            ok: true,
+            message: `${list.length} active session(s)`,
+          },
+        ];
+      } catch {
+        return [];
+      }
+    },
+  });
+}
 
 export default vibePlugin;
 export type * from "./provider.js";
