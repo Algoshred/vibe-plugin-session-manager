@@ -9,9 +9,7 @@
 import { Elysia, t } from "elysia";
 
 import type { SessionProvider } from "./provider.js";
-import type {
-  SessionProviderCapabilities,
-} from "./provider.js";
+import type { SessionProviderCapabilities } from "./provider.js";
 import type { HealthCheckResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -106,11 +104,34 @@ interface VibePlugin {
   onServerStop?: () => void;
 }
 
+/**
+ * Minimal facade of the agent's ProfileContext. The plugin has no hard
+ * dependency on the agent package; it accepts whichever shape the agent
+ * passes that is structurally compatible with this interface.
+ */
+export interface ProfileContext {
+  name: string;
+  dataDir: string;
+  logger: {
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+    error: (...args: unknown[]) => void;
+    debug: (...args: unknown[]) => void;
+  };
+  audit?: {
+    emit: (event: string, payload?: unknown) => void;
+  };
+}
+
+export type VibePluginFactory = (ctx: ProfileContext) => VibePlugin;
+
 // ---------------------------------------------------------------------------
 // Feature keys — all valid feature names for negotiation
 // ---------------------------------------------------------------------------
 
-const FEATURE_KEYS: ReadonlyArray<keyof SessionProviderCapabilities["features"]> = [
+const FEATURE_KEYS: ReadonlyArray<
+  keyof SessionProviderCapabilities["features"]
+> = [
   "mouse",
   "resize",
   "capture",
@@ -144,10 +165,14 @@ class SessionManager {
       const source = "session-manager";
       const logger = hostServices.logger;
       this.log = {
-        info: (msg, meta) => logger.info(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        warn: (msg, meta) => logger.warn(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        error: (msg, meta) => logger.error(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        debug: (msg, meta) => logger.debug(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        info: (msg, meta) =>
+          logger.info(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        warn: (msg, meta) =>
+          logger.warn(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        error: (msg, meta) =>
+          logger.error(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
+        debug: (msg, meta) =>
+          logger.debug(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
       };
     }
     this.registry = hostServices?.serviceRegistry;
@@ -157,7 +182,10 @@ class SessionManager {
   /**
    * List all registered session provider entries from the service registry.
    */
-  private listProviderEntries(): Array<{ pluginName: string; isDefault: boolean }> {
+  private listProviderEntries(): Array<{
+    pluginName: string;
+    isDefault: boolean;
+  }> {
     if (!this.registry) {
       this.log.warn("No service registry available");
       return [];
@@ -170,7 +198,10 @@ class SessionManager {
    */
   private getProvider(pluginName: string): SessionProvider | undefined {
     if (!this.registry) return undefined;
-    return this.registry.getProviderByName<SessionProvider>("session", pluginName);
+    return this.registry.getProviderByName<SessionProvider>(
+      "session",
+      pluginName,
+    );
   }
 
   /**
@@ -356,7 +387,9 @@ function createSessionManagerRoutes(manager: SessionManager) {
     .get(
       "/capabilities/:provider",
       ({ params }) => {
-        const capabilities = manager.getCapabilitiesForProvider(params.provider);
+        const capabilities = manager.getCapabilitiesForProvider(
+          params.provider,
+        );
         if (!capabilities) {
           return {
             error: `Provider "${params.provider}" not found or has no capabilities`,
@@ -391,36 +424,45 @@ function createSessionManagerRoutes(manager: SessionManager) {
 // Plugin export
 // ---------------------------------------------------------------------------
 
-const manager = new SessionManager();
+/**
+ * Plugin Contract v2 factory. Per-profile state (the SessionManager
+ * instance) lives in this closure so concurrent profiles cannot share
+ * a manager across ProfileContexts.
+ */
+export const createPlugin: VibePluginFactory = (
+  _ctx: ProfileContext,
+): VibePlugin => {
+  const manager = new SessionManager();
 
-export const vibePlugin: VibePlugin = {
-  capabilities: {
-    storage: "rw",
-    subprocess: true,
-    broadcast: true,
-    audit: true,
-    telemetry: true,
-  },
-  name: "session-manager",
-  version: "2026.329.1",
-  description:
-    "Unified session manager — capability discovery, feature negotiation, and provider routing across session providers",
-  tags: ["backend", "integration"],
-  apiPrefix: "/api/session-manager",
+  return {
+    capabilities: {
+      storage: "rw",
+      subprocess: true,
+      broadcast: true,
+      audit: true,
+      telemetry: true,
+    },
+    name: "session-manager",
+    version: "2026.329.1",
+    description:
+      "Unified session manager — capability discovery, feature negotiation, and provider routing across session providers",
+    tags: ["backend", "integration"],
+    apiPrefix: "/api/session-manager",
 
-  createRoutes() {
-    return createSessionManagerRoutes(manager);
-  },
+    createRoutes() {
+      return createSessionManagerRoutes(manager);
+    },
 
-  onCliSetup(_program: unknown, hostServices?: HostServices): void {
-    registerStatusContributors(hostServices);
-  },
+    onCliSetup(_program: unknown, hostServices?: HostServices): void {
+      registerStatusContributors(hostServices);
+    },
 
-  onServerStart(_app: unknown, hostServices?: HostServices): void {
-    hostServices?.telemetry?.emit("session.meta.ready", {});
-    manager.init(hostServices);
-    registerStatusContributors(hostServices);
-  },
+    onServerStart(_app: unknown, hostServices?: HostServices): void {
+      hostServices?.telemetry?.emit("session.meta.ready", {});
+      manager.init(hostServices);
+      registerStatusContributors(hostServices);
+    },
+  };
 };
 
 function registerStatusContributors(hostServices?: HostServices): void {
@@ -498,7 +540,7 @@ function registerStatusContributors(hostServices?: HostServices): void {
   });
 }
 
-export default vibePlugin;
+export default createPlugin;
 export type * from "./provider.js";
 export type * from "./types.js";
 export type { VibePlugin, HostServices };
