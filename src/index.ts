@@ -1,129 +1,36 @@
 /**
- * @burdenoff/vibe-plugin-session-manager
+ * @vibecontrols/vibe-plugin-session-manager
  *
  * Unified session manager plugin for VibeControls Agent.
  * Provides capability discovery, feature negotiation, and provider routing
  * across all registered session providers (tmux, wezterm, zellij, etc.).
+ *
+ * Migrated to consume @vibecontrols/plugin-sdk@2026.509.1 — inline contract
+ * stubs replaced with SDK imports; provider registry access goes through
+ * the SDK ProviderRegistry façade.
  */
 
 import { Elysia, t } from "elysia";
+import type {
+  HostServices,
+  ProfileContext,
+  VibePlugin,
+  VibePluginFactory,
+} from "@vibecontrols/plugin-sdk/contract";
+import { createLifecycleHooks } from "@vibecontrols/plugin-sdk/lifecycle";
+import { BoundLogger } from "@vibecontrols/plugin-sdk/log";
+import { ProviderRegistry } from "@vibecontrols/plugin-sdk/providers";
 
 import type { SessionProvider } from "./provider.js";
 import type { SessionProviderCapabilities } from "./provider.js";
 import type { HealthCheckResult } from "./types.js";
 
 // ---------------------------------------------------------------------------
-// HostServices — provided by the vibe-agent runtime at plugin load
+// Constants
 // ---------------------------------------------------------------------------
 
-interface HostLogger {
-  info(message: string, meta?: Record<string, unknown>): void;
-  warn(message: string, meta?: Record<string, unknown>): void;
-  error(message: string, meta?: Record<string, unknown>): void;
-  debug(message: string, meta?: Record<string, unknown>): void;
-}
-
-interface ServiceRegistry {
-  registerService(
-    pluginName: string,
-    serviceName: string,
-    service: unknown,
-  ): void;
-  getProviderByName<T>(type: string, name: string): T | undefined;
-  listProvidersForType(
-    type: string,
-  ): Array<{ pluginName: string; isDefault: boolean }>;
-}
-
-interface CliContributorRegistryLike {
-  addStatusSection(section: {
-    source: string;
-    title: string;
-    render: (ctx: { agentUrl: string }) => Promise<string | null>;
-    json?: (ctx: { agentUrl: string }) => Promise<unknown>;
-    jsonKey?: string;
-  }): void;
-  addDoctorCheck(check: {
-    source: string;
-    run: () => Promise<
-      Array<{
-        name: string;
-        ok: boolean;
-        grade?: "warn";
-        message: string;
-        hint?: string;
-      }>
-    >;
-  }): void;
-}
-
-interface HostServices {
-  telemetry?: {
-    emit: (name: string, payload?: Record<string, unknown>) => void;
-  };
-  logger?: {
-    info(source: string, msg: string): void;
-    warn(source: string, msg: string): void;
-    error(source: string, msg: string): void;
-    debug(source: string, msg: string): void;
-  };
-  config?: Record<string, unknown>;
-  serviceRegistry?: ServiceRegistry;
-  cliContributors?: CliContributorRegistryLike;
-}
-
-// ---------------------------------------------------------------------------
-// VibePlugin interface
-// ---------------------------------------------------------------------------
-
-interface PluginCapabilities {
-  storage?: "none" | "read" | "rw";
-  secrets?: "none" | "read" | "rw";
-  gateway?: boolean;
-  broadcast?: boolean;
-  subprocess?: boolean;
-  audit?: boolean;
-  telemetry?: boolean;
-}
-
-interface VibePlugin {
-  capabilities?: PluginCapabilities;
-  name: string;
-  version: string;
-  description: string;
-  tags?: Array<
-    "backend" | "frontend" | "cli" | "provider" | "adapter" | "integration"
-  >;
-  cliCommand?: string;
-  apiPrefix?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  createRoutes?: () => any;
-  onCliSetup?: (program: unknown, hostServices?: HostServices) => void;
-  onServerStart?: (app: unknown, hostServices?: HostServices) => void;
-  onServerReady?: (app: unknown, hostServices?: HostServices) => void;
-  onServerStop?: () => void;
-}
-
-/**
- * Minimal facade of the agent's ProfileContext. The plugin has no hard
- * dependency on the agent package; it accepts whichever shape the agent
- * passes that is structurally compatible with this interface.
- */
-export interface ProfileContext {
-  name: string;
-  dataDir: string;
-  logger: {
-    info: (...args: unknown[]) => void;
-    warn: (...args: unknown[]) => void;
-    error: (...args: unknown[]) => void;
-    debug: (...args: unknown[]) => void;
-  };
-  audit?: {
-    emit: (event: string, payload?: unknown) => void;
-  };
-}
-
-export type VibePluginFactory = (ctx: ProfileContext) => VibePlugin;
+const PLUGIN_NAME = "session-manager";
+const PLUGIN_VERSION = "2026.509.2";
 
 // ---------------------------------------------------------------------------
 // Feature keys — all valid feature names for negotiation
@@ -148,49 +55,24 @@ const FEATURE_KEYS: ReadonlyArray<
 // ---------------------------------------------------------------------------
 
 class SessionManager {
-  private registry: ServiceRegistry | undefined;
-  private log: HostLogger;
-
-  constructor() {
-    this.log = {
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      debug: () => {},
-    };
-  }
+  private registry: ProviderRegistry | undefined;
+  private log: BoundLogger = new BoundLogger(undefined, PLUGIN_NAME);
 
   init(hostServices?: HostServices): void {
-    if (hostServices?.logger) {
-      const source = "session-manager";
-      const logger = hostServices.logger;
-      this.log = {
-        info: (msg, meta) =>
-          logger.info(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        warn: (msg, meta) =>
-          logger.warn(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        error: (msg, meta) =>
-          logger.error(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-        debug: (msg, meta) =>
-          logger.debug(source, meta ? `${msg} ${JSON.stringify(meta)}` : msg),
-      };
-    }
-    this.registry = hostServices?.serviceRegistry;
+    this.log = new BoundLogger(hostServices?.logger, PLUGIN_NAME);
+    this.registry = new ProviderRegistry(hostServices);
     this.log.info("Session manager initialized");
   }
 
   /**
-   * List all registered session provider entries from the service registry.
+   * List all registered session provider plugin names from the host registry.
    */
-  private listProviderEntries(): Array<{
-    pluginName: string;
-    isDefault: boolean;
-  }> {
+  private listProviderNames(): string[] {
     if (!this.registry) {
       this.log.warn("No service registry available");
       return [];
     }
-    return this.registry.listProvidersForType("session");
+    return this.registry.listProviders("session");
   }
 
   /**
@@ -198,27 +80,23 @@ class SessionManager {
    */
   private getProvider(pluginName: string): SessionProvider | undefined {
     if (!this.registry) return undefined;
-    return this.registry.getProviderByName<SessionProvider>(
-      "session",
-      pluginName,
-    );
+    return this.registry.getProvider<SessionProvider>("session", pluginName);
   }
 
   /**
    * Get capabilities for all registered session providers.
    */
   getAllCapabilities(): SessionProviderCapabilities[] {
-    const entries = this.listProviderEntries();
+    const names = this.listProviderNames();
     const results: SessionProviderCapabilities[] = [];
 
-    for (const entry of entries) {
-      const provider = this.getProvider(entry.pluginName);
+    for (const name of names) {
+      const provider = this.getProvider(name);
       if (!provider) continue;
 
       if (provider.getCapabilities) {
         results.push(provider.getCapabilities());
       } else {
-        // Provider does not implement getCapabilities — return a minimal record
         results.push({
           provider: provider.name,
           features: {
@@ -252,9 +130,6 @@ class SessionManager {
 
   /**
    * Negotiate: given a list of desired feature names, find the best provider.
-   * "Best" = the provider that supports the most desired features.
-   * Returns the best match, list of supported/unsupported features, and all
-   * candidates sorted by score.
    */
   negotiate(desiredFeatures: string[]): {
     bestProvider: string | null;
@@ -278,7 +153,6 @@ class SessionManager {
       };
     }
 
-    // Validate desired features against known keys
     const validFeatures = desiredFeatures.filter((f) =>
       FEATURE_KEYS.includes(f as keyof SessionProviderCapabilities["features"]),
     );
@@ -304,7 +178,6 @@ class SessionManager {
       };
     });
 
-    // Sort by score descending, then alphabetically for tie-breaking
     candidates.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return a.provider.localeCompare(b.provider);
@@ -332,7 +205,7 @@ class SessionManager {
       capabilities: SessionProviderCapabilities | null;
     }>
   > {
-    const entries = this.listProviderEntries();
+    const names = this.listProviderNames();
     const results: Array<{
       pluginName: string;
       providerName: string;
@@ -341,8 +214,8 @@ class SessionManager {
       capabilities: SessionProviderCapabilities | null;
     }> = [];
 
-    for (const entry of entries) {
-      const provider = this.getProvider(entry.pluginName);
+    for (const name of names) {
+      const provider = this.getProvider(name);
       let health: HealthCheckResult | null = null;
       let capabilities: SessionProviderCapabilities | null = null;
 
@@ -351,7 +224,7 @@ class SessionManager {
           health = await provider.healthCheck();
         } catch (err) {
           this.log.error("Health check failed for provider", {
-            pluginName: entry.pluginName,
+            pluginName: name,
             error: String(err),
           });
         }
@@ -362,9 +235,11 @@ class SessionManager {
       }
 
       results.push({
-        pluginName: entry.pluginName,
-        providerName: provider?.name ?? entry.pluginName,
-        isDefault: entry.isDefault,
+        pluginName: name,
+        providerName: provider?.name ?? name,
+        // SDK registry doesn't track default-provider election; agents that
+        // need this can fall back to first-registered.
+        isDefault: false,
         health,
         capabilities,
       });
@@ -434,6 +309,15 @@ export const createPlugin: VibePluginFactory = (
 ): VibePlugin => {
   const manager = new SessionManager();
 
+  const lifecycle = createLifecycleHooks({
+    name: PLUGIN_NAME,
+    telemetryEventName: "session.meta.ready",
+    onInit: async (hostServices) => {
+      manager.init(hostServices);
+      registerStatusContributors(hostServices);
+    },
+  });
+
   return {
     capabilities: {
       storage: "rw",
@@ -442,8 +326,8 @@ export const createPlugin: VibePluginFactory = (
       audit: true,
       telemetry: true,
     },
-    name: "session-manager",
-    version: "2026.329.1",
+    name: PLUGIN_NAME,
+    version: PLUGIN_VERSION,
     description:
       "Unified session manager — capability discovery, feature negotiation, and provider routing across session providers",
     tags: ["backend", "integration"],
@@ -453,26 +337,23 @@ export const createPlugin: VibePluginFactory = (
       return createSessionManagerRoutes(manager);
     },
 
-    onCliSetup(_program: unknown, hostServices?: HostServices): void {
+    onCliSetup(_program: unknown, hostServices: HostServices): void {
       registerStatusContributors(hostServices);
     },
 
-    onServerStart(_app: unknown, hostServices?: HostServices): void {
-      hostServices?.telemetry?.emit("session.meta.ready", {});
-      manager.init(hostServices);
-      registerStatusContributors(hostServices);
-    },
+    onServerStart: lifecycle.onServerStart,
+    onServerStop: lifecycle.onServerStop,
   };
 };
 
 function registerStatusContributors(hostServices?: HostServices): void {
   const reg = hostServices?.cliContributors;
-  if (!reg) return; // older agent without contributor registry — graceful no-op
+  if (!reg) return;
 
-  reg.addStatusSection({
-    source: "session-manager",
+  reg.addStatusSection?.({
+    source: PLUGIN_NAME,
     title: "Sessions",
-    render: async ({ agentUrl }) => {
+    render: async ({ agentUrl }: { agentUrl: string }) => {
       try {
         const res = await fetch(`${agentUrl}/api/sessions`);
         if (!res.ok) return null;
@@ -484,7 +365,7 @@ function registerStatusContributors(hostServices?: HostServices): void {
         return null;
       }
     },
-    json: async ({ agentUrl }) => {
+    json: async ({ agentUrl }: { agentUrl: string }) => {
       try {
         const res = await fetch(`${agentUrl}/api/sessions`);
         if (!res.ok) return null;
@@ -496,8 +377,8 @@ function registerStatusContributors(hostServices?: HostServices): void {
     jsonKey: "sessions",
   });
 
-  reg.addDoctorCheck({
-    source: "session-manager",
+  reg.addDoctorCheck?.({
+    source: PLUGIN_NAME,
     run: async () => {
       try {
         const port = (process.env.AGENT_URL ?? "http://localhost:3005").replace(
