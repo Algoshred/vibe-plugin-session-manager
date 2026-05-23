@@ -343,6 +343,50 @@ export const createPlugin: VibePluginFactory = (
 
     onServerStart: lifecycle.onServerStart,
     onServerStop: lifecycle.onServerStop,
+    onServerReady(_app: unknown, hostServices?: HostServices) {
+      // Contribute a context provider so the LLM Context feature can list
+      // installed session providers + recent activity. Late-import keeps
+      // the plugin tolerant of older SDK versions that predate the
+      // /context subpath.
+      void (async () => {
+        try {
+          const sdkContext = (await import("@vibecontrols/plugin-sdk/context")) as {
+            registerContextProvider?: (provider: {
+              name: string;
+              timeoutMs?: number;
+              getContext: () => Promise<{
+                pluginName: string;
+                description?: string;
+                data: Record<string, unknown>;
+              }>;
+            }) => void;
+          };
+          sdkContext.registerContextProvider?.({
+            name: "session-manager",
+            timeoutMs: 800,
+            async getContext() {
+              const reg = hostServices?.serviceRegistry;
+              const providerEntries = reg?.listProvidersForType?.("session") ?? [];
+              const providerNames = providerEntries.map((e) =>
+                typeof e === "string" ? e : e.pluginName,
+              );
+              return {
+                pluginName: "session-manager",
+                description:
+                  "Session orchestration plugin — currently registered session providers + metadata.",
+                data: {
+                  pluginVersion: PLUGIN_VERSION,
+                  providers: providerNames,
+                  count: providerNames.length,
+                },
+              };
+            },
+          });
+        } catch {
+          // SDK doesn't support context yet — silently skip
+        }
+      })();
+    },
   };
 };
 

@@ -37,7 +37,7 @@
   "license": "SEE LICENSE IN LICENSE",
   "description": "Unified session manager plugin for VibeControls Agent \u2014 capability discovery, feature negotiation, and provider routing across session providers",
   "dependencies": {
-    "@vibecontrols/plugin-sdk": "2026.509.2",
+    "@vibecontrols/plugin-sdk": "2026.522.1",
     "elysia": "^1.3.0"
   },
   "devDependencies": {
