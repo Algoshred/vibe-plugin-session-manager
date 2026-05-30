@@ -30,6 +30,23 @@ export interface TerminalInfo {
   url: string;
   port: number;
   pid: number;
+  /**
+   * Loopback host the terminal server listens on. The agent's terminal proxy
+   * connects here. Defaults to `127.0.0.1` when the provider omits it.
+   */
+  host?: string;
+  /**
+   * WebSocket path the terminal server exposes for the live PTY stream, e.g.
+   * `/ws`. The agent proxies the browser WS to `ws://{host}:{port}{wsPath}`
+   * WITHOUT assuming any particular terminal backend. Defaults to `/ws`.
+   */
+  wsPath?: string;
+  /**
+   * WebSocket subprotocols the terminal server negotiates (e.g. `["tty"]` for
+   * ttyd). The agent forwards these verbatim, so it never hardcodes a
+   * provider-specific subprotocol. Defaults to `["tty"]`.
+   */
+  subprotocols?: string[];
 }
 
 export interface SessionInfo {
