@@ -333,6 +333,23 @@ export const createPlugin: VibePluginFactory = (
     tags: ["backend", "integration"],
     apiPrefix: "/api/session-manager",
 
+    metaProviders: [
+      {
+        packageName: "@vibecontrols/vibe-plugin-session-tmux",
+        pluginName: "session-tmux",
+        defaultOn: ["linux", "darwin"],
+      },
+      {
+        packageName: "@vibecontrols/vibe-plugin-session-wezterm",
+        pluginName: "session-wezterm",
+        defaultOn: ["win32"],
+      },
+      {
+        packageName: "@vibecontrols/vibe-plugin-session-zellij",
+        pluginName: "session-zellij",
+      },
+    ],
+
     createRoutes() {
       return createSessionManagerRoutes(manager);
     },
@@ -350,23 +367,25 @@ export const createPlugin: VibePluginFactory = (
       // /context subpath.
       void (async () => {
         try {
-          const sdkContext = (await import("@vibecontrols/plugin-sdk/context")) as {
-            registerContextProvider?: (provider: {
-              name: string;
-              timeoutMs?: number;
-              getContext: () => Promise<{
-                pluginName: string;
-                description?: string;
-                data: Record<string, unknown>;
-              }>;
-            }) => void;
-          };
+          const sdkContext =
+            (await import("@vibecontrols/plugin-sdk/context")) as {
+              registerContextProvider?: (provider: {
+                name: string;
+                timeoutMs?: number;
+                getContext: () => Promise<{
+                  pluginName: string;
+                  description?: string;
+                  data: Record<string, unknown>;
+                }>;
+              }) => void;
+            };
           sdkContext.registerContextProvider?.({
             name: "session-manager",
             timeoutMs: 800,
             async getContext() {
               const reg = hostServices?.serviceRegistry;
-              const providerEntries = reg?.listProvidersForType?.("session") ?? [];
+              const providerEntries =
+                reg?.listProvidersForType?.("session") ?? [];
               const providerNames = providerEntries.map((e) =>
                 typeof e === "string" ? e : e.pluginName,
               );
