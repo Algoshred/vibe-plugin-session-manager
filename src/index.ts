@@ -23,14 +23,15 @@ import { ProviderRegistry } from "@vibecontrols/plugin-sdk/providers";
 
 import type { SessionProvider } from "./provider.js";
 import type { SessionProviderCapabilities } from "./provider.js";
-import type { HealthCheckResult } from "./types.js";
+import type { HealthCheckResult, SessionServiceRegistry } from "./types.js";
+import { createSessionRoutes } from "./routes.js";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const PLUGIN_NAME = "session-manager";
-const PLUGIN_VERSION = "2026.509.2";
+const PLUGIN_VERSION = "2026.530.3";
 
 // ---------------------------------------------------------------------------
 // Feature keys — all valid feature names for negotiation
@@ -309,11 +310,41 @@ export const createPlugin: VibePluginFactory = (
 ): VibePlugin => {
   const manager = new SessionManager();
 
+  // Rich agent ServiceRegistry, captured at onInit (which fires on
+  // onServerStart — AFTER createRoutes). The session-operation handlers read
+  // it lazily at request time through this proxy, so createRoutes() can close
+  // over a stable object even though the registry isn't ready at mount time.
+  // Mirrors the tunnel meta's manager.init(host.serviceRegistry) cast.
+  let richRegistry: SessionServiceRegistry | undefined;
+  const requireRegistry = (): SessionServiceRegistry => {
+    if (!richRegistry) {
+      throw new Error("Session manager registry not initialized");
+    }
+    return richRegistry;
+  };
+  const lazyRegistry: SessionServiceRegistry = {
+    getProvider<T>(type: string): T | undefined {
+      return requireRegistry().getProvider<T>(type);
+    },
+    getProviderByName<T>(type: string, pluginName: string): T | undefined {
+      return requireRegistry().getProviderByName<T>(type, pluginName);
+    },
+    listProvidersForType(type: string) {
+      return requireRegistry().listProvidersForType(type);
+    },
+    setProviderDefault(type: string, pluginName: string) {
+      requireRegistry().setProviderDefault?.(type, pluginName);
+    },
+  };
+
   const lifecycle = createLifecycleHooks({
     name: PLUGIN_NAME,
     telemetryEventName: "session.meta.ready",
     onInit: async (hostServices) => {
       manager.init(hostServices);
+      richRegistry = hostServices.serviceRegistry as unknown as
+        | SessionServiceRegistry
+        | undefined;
       registerStatusContributors(hostServices);
     },
   });
@@ -330,28 +361,42 @@ export const createPlugin: VibePluginFactory = (
     version: PLUGIN_VERSION,
     description:
       "Unified session manager — capability discovery, feature negotiation, and provider routing across session providers",
-    tags: ["backend", "integration"],
-    apiPrefix: "/api/session-manager",
+    tags: ["backend", "cli", "provider", "integration"],
+    // This meta now owns the full session-operations surface (the agent no
+    // longer ships a core `session` plugin). Capability discovery + feature
+    // negotiation move under `/api/sessions/manager/*`.
+    apiPrefix: "/api/sessions",
 
     metaProviders: [
       {
         packageName: "@vibecontrols/vibe-plugin-session-tmux",
         pluginName: "session-tmux",
         defaultOn: ["linux", "darwin"],
+        providerType: "session",
       },
       {
         packageName: "@vibecontrols/vibe-plugin-session-wezterm",
         pluginName: "session-wezterm",
         defaultOn: ["win32"],
+        providerType: "session",
       },
       {
         packageName: "@vibecontrols/vibe-plugin-session-zellij",
         pluginName: "session-zellij",
+        providerType: "session",
       },
     ],
 
     createRoutes() {
-      return createSessionManagerRoutes(manager);
+      // Session operations at the prefix root (1:1 with the former agent-core
+      // `/api/sessions` plugin), capability discovery/negotiation nested under
+      // `/manager/*`. Mounting the static `/manager` group first keeps it from
+      // ever being shadowed by the operations' `/:id` param route.
+      return new Elysia()
+        .group("/manager", (app) =>
+          app.use(createSessionManagerRoutes(manager)),
+        )
+        .use(createSessionRoutes(lazyRegistry));
     },
 
     onCliSetup(_program: unknown, hostServices: HostServices): void {

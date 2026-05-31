@@ -84,3 +84,28 @@ export interface SystemTerminalInfo {
   port: number;
   sessionId?: string;
 }
+
+/**
+ * Structural view of the agent's runtime ServiceRegistry — richer than the
+ * SDK's neutral `ServiceRegistry` (provider defaults + `{pluginName,isDefault}`
+ * listing). Mirrors the tunnel meta's `TunnelServiceRegistry`. The session
+ * routes narrow `host.serviceRegistry` to this via a single cast at the
+ * boundary so they can resolve a specific provider by name + the default.
+ */
+export interface SessionServiceRegistry {
+  getProvider<T>(type: string): T | undefined;
+  getProviderByName<T>(type: string, pluginName: string): T | undefined;
+  listProvidersForType(
+    type: string,
+  ): Array<{ pluginName: string; isDefault: boolean }>;
+  setProviderDefault?(type: string, pluginName: string): void;
+}
+
+/**
+ * Minimal structural view of a tunnel provider. The session terminal routes
+ * only need its active public URL to build the terminal proxy URL, so we avoid
+ * a dependency on the tunnel meta's full provider contract.
+ */
+export interface TunnelProvider {
+  getActiveTunnelUrl?(): Promise<string | null>;
+}
