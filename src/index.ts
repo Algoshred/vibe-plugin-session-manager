@@ -16,13 +16,41 @@ import { dirname, join as joinPath } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   HostServices,
+  MetaProviderRef,
   ProfileContext,
   VibePlugin,
   VibePluginFactory,
 } from "@vibecontrols/plugin-sdk/contract";
 import { createLifecycleHooks } from "@vibecontrols/plugin-sdk/lifecycle";
 import { BoundLogger } from "@vibecontrols/plugin-sdk/log";
-import { ProviderRegistry } from "@vibecontrols/plugin-sdk/providers";
+import {
+  ProviderRegistry,
+  provisionMetaProviders,
+} from "@vibecontrols/plugin-sdk/providers";
+
+/**
+ * Provider packages this meta routes to + per-platform defaults. The meta —
+ * not the agent — installs/loads/prereqs/elects them via `provisionProviders`.
+ */
+const SESSION_PROVIDERS: ReadonlyArray<MetaProviderRef> = [
+  {
+    packageName: "@vibecontrols/vibe-plugin-session-tmux",
+    pluginName: "session-tmux",
+    defaultOn: ["linux", "darwin"],
+    providerType: "session",
+  },
+  {
+    packageName: "@vibecontrols/vibe-plugin-session-wezterm",
+    pluginName: "session-wezterm",
+    defaultOn: ["win32"],
+    providerType: "session",
+  },
+  {
+    packageName: "@vibecontrols/vibe-plugin-session-zellij",
+    pluginName: "session-zellij",
+    providerType: "session",
+  },
+];
 
 import type { SessionProvider } from "./provider.js";
 import type { SessionProviderCapabilities } from "./provider.js";
@@ -400,25 +428,10 @@ export const createPlugin: VibePluginFactory = (
     // negotiation move under `/api/sessions/manager/*`.
     apiPrefix: "/api/sessions",
 
-    metaProviders: [
-      {
-        packageName: "@vibecontrols/vibe-plugin-session-tmux",
-        pluginName: "session-tmux",
-        defaultOn: ["linux", "darwin"],
-        providerType: "session",
-      },
-      {
-        packageName: "@vibecontrols/vibe-plugin-session-wezterm",
-        pluginName: "session-wezterm",
-        defaultOn: ["win32"],
-        providerType: "session",
-      },
-      {
-        packageName: "@vibecontrols/vibe-plugin-session-zellij",
-        pluginName: "session-zellij",
-        providerType: "session",
-      },
-    ],
+    metaProviders: SESSION_PROVIDERS,
+
+    provisionProviders: (hostServices: HostServices) =>
+      provisionMetaProviders(hostServices, SESSION_PROVIDERS),
 
     createRoutes() {
       // Session operations at the prefix root (1:1 with the former agent-core
