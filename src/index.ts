@@ -50,6 +50,15 @@ const SESSION_PROVIDERS: ReadonlyArray<MetaProviderRef> = [
     pluginName: "session-zellij",
     providerType: "session",
   },
+  {
+    // Direct ttyd — a plain shell with no multiplexer and no persisted
+    // session (native selection/copy-paste, ephemeral). Opt-in: selected when
+    // a session's terminalProvider resolves to "session-terminal" (the
+    // workspace svc maps SessionType.TERMINAL to it). Not a platform default.
+    packageName: "@vibecontrols/vibe-plugin-session-terminal",
+    pluginName: "session-terminal",
+    providerType: "session",
+  },
 ];
 
 import type { SessionProvider } from "./provider.js";
