@@ -413,8 +413,7 @@ export const createPlugin: VibePluginFactory = (
     onInit: async (hostServices) => {
       manager.init(hostServices);
       richRegistry = hostServices.serviceRegistry as unknown as
-        | SessionServiceRegistry
-        | undefined;
+        SessionServiceRegistry | undefined;
       registerStatusContributors(hostServices);
     },
   });
