@@ -60,10 +60,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/algoshred/vibe-plugin-session-manager.git"
+    "url": "git+https://github.com/Algoshred/vibe-plugin-session-manager.git"
   },
   "bugs": {
-    "url": "https://github.com/algoshred/vibe-plugin-session-manager/issues"
+    "url": "https://github.com/Algoshred/vibe-plugin-session-manager/issues"
   },
   "homepage": "https://vibecontrols.com",
   "publishConfig": {
